@@ -27,8 +27,8 @@ COPY requirements.txt .
 
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy the rest of the application files
-COPY . .
+# Copy application files
+COPY storyteller storyteller
 
 # Load model weights to the predefined dir
 RUN python storyteller/preload.py
