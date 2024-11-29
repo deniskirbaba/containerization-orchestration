@@ -1,0 +1,74 @@
+services:
+
+  # Init container
+  loader:
+    image: cont-lab2-init-loader
+    build: ./loader
+    container_name: loader
+    volumes:
+      - ./models/tinyllama-110M:/loader/model
+    networks:
+      - cont-lab2
+
+  # llama.cpp server
+  model-server:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: model-server
+    env_file: ".env"
+    ports:
+      - ${LLAMA_ARG_PORT}:${LLAMA_ARG_PORT}
+    volumes:
+      - ./models:/models
+    healthcheck:
+      test: "curl -f http://${LLAMA_ARG_HOST}:${LLAMA_ARG_PORT}/health"
+      interval: 1m30s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+    depends_on:
+      - loader
+    networks:
+      - cont-lab2
+
+  # PostgreSQL DB
+  db:
+    image: postgres:17.2-alpine3.20
+    container_name: database
+    env_file: ".env"
+    ports:
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    shm_size: 128mb  # set shared memory limit when using docker-compose
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $$POSTGRES_DB -U $$POSTGRES_USER"]
+      interval: 1m30s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+    networks:
+      - cont-lab2
+
+  # Application logic
+  app:
+    image: cont-lab2-app
+    build: ./app
+    container_name: app
+    env_file: ".env"
+    command: streamlit run app.py
+    ports:
+      - 8501:8501
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      model-server:
+        condition: service_healthy
+    networks:
+      - cont-lab2
+
+networks:
+  cont-lab2:
+    driver: bridge

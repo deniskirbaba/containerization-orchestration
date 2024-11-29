@@ -78,7 +78,7 @@ docker start storyteller_app
     Поэтому логичнее разделить эти два слоя на следующие слои:  установка системных зависимостей, копирование только файла с сервисными зависимостями, установка сервисных зависимостей, копирование всех остальных файлов сервиса.  
 3. Не указывать `EXPORT`, `VOLUME`. Эти команды являются чисто "документационными", однако их опускать не стоит, так как они дают возможность разработчикам быстрее разобраться с докеризованным приложением.
 4. Игнорирование Python оптимизаций:
-    1. `PIP_NO_CACHE_DIR=off` - отключает кэш при установке библиотек - уменьшаем размер образа.
+    1. `PIP_NO_CACHE_DIR=on` - отключает кэш при установке библиотек - уменьшаем размер образа.
     2. `PYTHONUNBUFFERED=1` - отключает буфер для stdout, stderr - максимально быстрое получение информации от запущенного приложения в логи контейнера + в случае сбоя сразу увидим ошибку.
     3. ...
 
@@ -95,8 +95,106 @@ docker start storyteller_app
 
 ## Lab 2
 
-TODO
+[LLM-based story generation service - 2](/lab2/)
 
-* CPU inference optimization: <https://huggingface.co/docs/transformers/en/perf_infer_cpu>
-* Streaming of generated text
-* Using vLLM for model inference
+* Base model: [TinyLlama2-110M](https://huggingface.co/deniskirbaba/tinyllama-110M-F16-GGUF)
+* Interface: streamlit
+  * Local URL: <http://localhost:8501>
+  * Network URL: <http://172.17.0.2:8501>
+  * External URL: <http://178.178.245.34:8501>
+* Inference: via llama.cpp, CPU only
+  * Streaming mode for story generation
+  * Simple web front end to interact with llama.cpp: <http://localhost:8080>, but my service use streamlit-based front end
+* Init container `loader` for loading HF model in GGUF format and save as Docker Volume `/models`
+* Chat history
+  * PostgreSQL
+  * Data dumps are saved as Docker Volume `/chat_history`
+
+![Lab 2 demo](/media/storygen2.gif)
+
+### Structure
+
+```cmd
+└── lab2
+    ├── app
+    │   ├── app.py
+    │   ├── database
+    │   │   ├── connection.py
+    │   │   ├── datamodel.py
+    │   │   └── __init__.py
+    │   ├── database_bridge.py
+    │   ├── Dockerfile
+    │   ├── model_bridge.py
+    │   └── requirements.txt
+    ├── loader
+    │   ├── Dockerfile
+    │   └── load.sh
+    ├── docker-compose.yml
+    ├── models
+    └── postgres_data
+```
+
+### Services
+
+[docker-compose](/lab2/docker-compose.yml)
+
+#### [Loader (init container)](/lab2/loader/)
+
+Проверяет наличие весов модели на локальной машине (Volume `/models`), при отсутствии загружает их с Hugging Face.
+
+#### [Model server llama.cpp](https://github.com/ggerganov/llama.cpp)
+
+Сервер для эффективного инференса LLM на CPU с минимальными зависимостями. Используется Docker образ (`ghcr.io/ggerganov/llama.cpp:server`).
+
+* Предлагает интерфейс для взаимодействия с моделью на <http://localhost:8080>, однако данный сервис использует интерфейс на streamlit <http://localhost:8501>.
+* Docker Volume для хранения моделей
+* healthcheck для проверки готовности сервера (проверка осуществляется запросом на <http::/localhost:8080/health> - [info](https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md#get-health-returns-heath-check-result))
+* Запрос на генерацию текста нужно подавать в виде POST запроса на <http://localhost:8080/completion> - [info](https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md#post-completion-given-a-prompt-it-returns-the-predicted-completion)
+
+#### DB PostgreSQL
+
+PostgreSQL DB на основе образа `postgres:17.2-alpine3.20`. Креды БД находятся в файле [.env](/lab2/.env). Реализован healthcheck, а также сохранение данных через Docker Volumes в папку [postgres_data](/lab2/postgres_data/) (поставлено ограничение в 128mb).
+
+#### [Application](/lab2/storyteller/)
+
+Основное приложение - реализует логику, отправляет запросы на генерацию к серверу llama.cpp, сохраняет данные о переписке в БД, реализует интерфейс через Streamlit.
+
+Зависит от двух сервисов: база данных и сервер llama.cpp. Будет работать только в случае их исправности.
+
+### Questions
+
+#### Можно ли ограничивать ресурсы (например, память или CPU) для сервисов в docker-compose.yml? Если нет, то почему, если да, то как?
+
+[Да, можно](https://docs.docker.com/reference/compose-file/deploy/#resources). У каждого сервиса можно прописать ключ `deploy`, а в нем ключ `resources`. В нем можно указать как ограничения `limits` (верхнюю планку), так и нижнюю планку `reservations`. Можно конфигурировать:
+
+* CPU, GPU, TPU
+* Память
+* Лимит на число процессов
+
+Например:
+
+```yml
+services:
+  model:
+    image: llama3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 500M
+          pids: 10
+        reservations:
+          cpus: '0.25'
+          memory: 200M
+          devices:
+            - capabilities: ["nvidia-compute"]
+              driver: nvidia
+```
+
+#### Как можно запустить только определенный сервис из docker-compose.yml, не запуская остальные?
+
+Да, нужно выполнить не `up`, а `start` команду и прописать имя сервиса. Например:
+
+```cmd
+docker compose start model
+```
