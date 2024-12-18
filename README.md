@@ -198,3 +198,72 @@ services:
 ```cmd
 docker compose start model
 ```
+
+## Lab 3
+
+Манифесты из вводной части находятся в [original_manifests](/lab3/original_manifests/), манифесты из задания находятся в [edited_manifests](/lab3/edited_manifests/).
+
+**Структура**:
+
+```cmd
+lab3
+├── edited_manifests
+│   ├── nextcloud_configmap.yml
+│   ├── nextcloud_secret.yml
+│   ├── nextcloud.yml
+│   ├── postgres_configmap.yml
+│   ├── postgres_deployment.yml
+│   ├── postgres_secret.yml
+│   └── postgres_service.yml
+└── original_manifests
+    ├── nextcloud.yml
+    ├── pg_configmap.yml
+    ├── pg_deployment.yml
+    └── pg_service.yml
+```
+
+### Tutorials
+
+> **Вопрос: важен ли порядок выполнения этих манифестов? Почему?**  
+Если манифесты зависят друг от друга (как в случае с `pg_configmap.yml`, `pg_service.yml`, `pg_deployment.yml`), то порядок важен. Так как например если вначале запустить `pg_deployment.yml`, то контейнер с postgres не сможет запуститься без кредов БД (которые передаются в `pg_configmap.yml`).
+![pg_deployment is down](/media/lab3-1.png)
+Также, если запустить `pg_service.yml` после `pg_deployment.yml`, то сущность service для пода postgres не будет определена, а значит не будет уникального постоянного IP вне жизненного цикла поды postgres и мы не сможем потом взаимодействовать с БД извне кластера.  
+То есть, вообще говоря нет смысла так делать, так как в любом случае наш сервис будет недоступен до тех пор, пока не будут запущены требуемые манифесты без которых невозможна нормальная работа.
+
+![k8s dashboard](/media/lab%203-2.png)
+
+> **Вопрос: что (и почему) произойдет, если отскейлить количество реплик postgres-deployment в 0,
+затем обратно в 1, после чего попробовать снова зайти на Nextcloud?**  
+При уменьшении реплик postgres в 0 - мы просто убиваем все наши экземпляры БДшки - из-за этого нода Nextcloud теряет соединение и остаётся висеть без него. КОгда мы заново запускаем реплику - БДшка встанет, однако nextcloud уже не будет переподключаться к ней (она бы переподключилась если бы тоже упала, но такого не происходит).
+
+### Task
+
+1. Перенесеты креды (user и password) для postgres в отдельный манифест [postgres_secrets.yml](/lab3/edited_manifests/postgres_secrets.yml).
+
+2. Перенесеты переменные окружения для nextcloud в [nextcloud_configmap.yml](/lab3/edited_manifests/nextcloud_configmap.yml), а также креды вынесены в отдельный манифест [nextcloud_scret.yml](/lab3/edited_manifests/nextcloud_secret.yml).
+
+3. Добавлены readyness и liveness проверки ([nextcloud.yml](/lab3/edited_manifests/nextcloud.yml)). Исходя из информации из документации kubernetes:
+
+    > A common pattern for liveness probes is to use the same low-cost HTTP endpoint as for readiness probes, but with a higher failureThreshold. This ensures that the pod is observed as not-ready for some period of time before it is hard killed.
+
+    То есть по сути readyness проба определяет статус, при котором контейнер готов принимать входящий трафик и это необходимо когда контейнеру нужно время на загрузку, установку конфигурации или скачивание файлов. А liveness проба определяет когда перезапускать контейнер, если он вдруг стал работать нестабильно.
+
+![edited dashboard](/media/lab%203-3.png)
+
+### Screenshots
+
+![minikube start](/media/lab3-4.png)
+
+![config](/media/lab3-5.png)
+
+![creating manifests](/media/lab3-6.png)
+
+![check entites](/media/lab3-7.png)
+
+![describe nextcloud](/media/lab3-8.png)
+
+![describe postgres](/media/lab3-9.png)
+
+![nextcloud](/media/lab3-10.png)
+
+![another dashboard](/media/lab3-11.png)
