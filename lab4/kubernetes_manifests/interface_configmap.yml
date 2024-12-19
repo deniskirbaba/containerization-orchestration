@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: interface-configmap
+  labels:
+    app: interface
+data:
+  MAX_EMOTIONS: "5"
+  EMOTION_THRESHOLD: "0"

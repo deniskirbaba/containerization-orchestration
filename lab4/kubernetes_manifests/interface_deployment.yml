@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interface
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interface
+  template:
+    metadata:
+      labels:
+        app: interface
+    spec:
+      containers:
+        - name: interface-container
+          image: cont-lab4-interface:latest
+          imagePullPolicy: "Never"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MODEL_PORT
+              value: "8081"
+            - name: INTERFACE_PORT
+              value: "8080"
+            - name: MAX_EMOTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: interface-configmap
+                  key: MAX_EMOTIONS
+            - name: EMOTION_THRESHOLD
+              valueFrom:
+                configMapKeyRef:
+                  name: interface-configmap
+                  key: EMOTION_THRESHOLD

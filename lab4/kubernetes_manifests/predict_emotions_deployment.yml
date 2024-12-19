@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: predict-emotions
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: predict-emotions
+  template:
+    metadata:
+      labels:
+        app: predict-emotions
+    spec:
+      containers:
+        - name: predict-emotions-container
+          image: cont-lab4-predict-emotions:latest
+          imagePullPolicy: "Never"
+          ports:
+            - containerPort: 8081
+          env:
+            - name: MODEL_PORT
+              value: "8081"
+          volumeMounts:
+            - mountPath: /src/model
+              name: model-volume
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 3
+      initContainers:
+        - name: load-model-init-container
+          image: cont-lab4-load-model:latest
+          imagePullPolicy: "Never"
+          volumeMounts:
+            - mountPath: /loader/model
+              name: model-volume
+      volumes:
+        - name: model-volume
+          emptyDir:
+            sizeLimit: 2Gi

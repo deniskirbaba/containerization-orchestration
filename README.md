@@ -267,3 +267,156 @@ lab3
 ![nextcloud](/media/lab3-10.png)
 
 ![another dashboard](/media/lab3-11.png)
+
+## Lab 4
+
+### Description
+
+Service for detecting emotions from text:
+
+* ML Task: multi-label text classification
+* Model: [SamLowe/roberta-base-go_emotions](https://huggingface.co/SamLowe/roberta-base-go_emotions) 
+* The system is divided into 2 parts:
+  1. Gradio interface
+  2. Model server - FastAPI and pure Pipeline class from HF
+* Interaction via HTTP
+
+#### Demo
+
+![emotion-prediction-demo](/media/lab4-demo-gif.gif)
+
+### Structure
+
+```cmd
+└── lab4
+    ├── interface
+    │   ├── Dockerfile
+    │   └── src
+    │       ├── emotions.py
+    │       ├── interface.py
+    │       └── requirements.txt
+    ├── kubernetes_manifests
+    │   ├── interface_configmap.yml
+    │   ├── interface_deployment.yml
+    │   ├── interface_service.yml
+    │   ├── predict_emotions_deployment.yml
+    │   └── predict_emotions_service.yml
+    ├── model-loader
+    │   ├── Dockerfile
+    │   └── load-model.sh
+    └── predict-emotions
+        ├── Dockerfile
+        └── src
+            ├── api.py
+            ├── model.py
+            └── requirements.txt
+```
+
+### Services
+
+#### [Interface](/lab4/interface/)
+
+Realizes web frontend using Gradio. Sends requests entered into the form to the model server, processes the response and transforms the data for convenient visualization.
+
+Build docker image:
+
+```cmd
+cd lab4/interface
+docker build -t cont-lab4-interface -f Dockerfile ./src
+```
+
+#### [Model loader (initContainer)](/lab4/model-loader/)
+
+Init-container that implements one-time loading of model and tokenizer from HF. Saves this data to volume.
+
+Build docker image:
+
+```cmd
+cd lab4/model-loader
+docker build -t cont-lab4-load-model -f Dockerfile .
+```
+
+#### [Predict emotions](/lab4/predict-emotions/)
+
+A microservice that accepts text queries (/predict) and returns emotions predict results as a list of different emotions and their probabilities. Loads the model and tokenizer from a local folder to be mounted to the service.
+
+There are also API `/health` for livenessProbe.
+
+Build docker image:
+
+```cmd
+cd lab4/predict-emotions
+docker build -t cont-lab4-predict-emotions -f Dockerfile ./src
+```
+
+### [Manifests](/lab4/kubernetes_manifests/)
+
+#### Interface
+
+* [deployment](/lab4/kubernetes_manifests/interface_deployment.yml) - describes the `deployment` of the interface. Ports for services are defined, and environment variables (for interface configuration) are passed from the
+ [interface_configmap](/lab4/kubernetes_manifests/interface_configmap.yml)
+* [configmap](/lab4/kubernetes_manifests/interface_configmap.yml) - defining environment variables for interface configuration
+* [service](/lab4/kubernetes_manifests/interface_service.yml) - defining a `service` entity of the `NodePort` type to make communication between pods convenient, as well as for further access outside of the cluster
+
+#### Predict emotions
+
+* [deployment](/lab4/kubernetes_manifests/predict_emotions_deployment.yml) - definition of the `deployment` entity for model server. The port on which the service will run is defined. Created an `emptyDir` (ephemeral volume) to store the model and tokenizer, and then this volume is mounted to `initContainer` (which loads this data) and the model server itself (which uses the model). Also implemented `livenessProbe` of `httpGet` type - which checks if the container is healthy by analyzing the status codes of the response (if 200-399 - it is healthy)
+* [service](/lab4/kubernetes_manifests/predict_emotions_service.yml) - defining a `service` entity of the `NodePort` type to make communication between pods convenient, as well as for further access outside of the cluster
+
+### Launching cluster
+
+Starting minikube:
+
+```cmd
+minikube start
+```
+
+In order to use local Docker images in Minikube, execute this in every terminal, which will be used for cluster manipulating:
+
+```cmd
+eval $(minikube docker-env)
+```
+
+Also need to build docker images after executing this command!  
+Thanks this [stackoverflow post](https://stackoverflow.com/questions/42564058/how-can-i-use-local-docker-images-with-minikube)
+
+So, when listing all Docker images we can see this:
+![docker images](/media/lab4-1.png)
+
+Applying all manifests:
+
+```cmd
+kubectl apply -f interface_configmap.yml &&
+kubectl apply -f interface_service.yml &&
+kubectl apply -f interface_deployment.yml &&
+kubectl apply -f predict_emotions_service.yml &&
+kubectl apply -f predict_emotions_deployment.yml
+```
+
+So, when introspecting entities, we can see this:
+![get entities](/media/lab4-2.png)
+
+Also, can see some logs:
+
+```cmd
+kubectl logs -f interface-6598dc58f8-9x4wp
+```
+
+![interface logs](/media/lab4-3.png)
+
+From logs of predict-emotions service we can see the HTTP liveness checks:
+
+```cmd
+kubectl logs -f predict-emotions-594889d556-cbzr7
+```
+
+![predict logs](/media/lab4-4.png)
+
+For getting access from outside of the cluster to the interface we need to `port-forward` ports. (Note: on my PC `minikube service <service-name>` command don't work - [github issue](https://github.com/kubernetes/minikube/issues/13746)).
+
+```cmd
+kubectl port-forward service/interface-service 8080:8080
+```
+
+After that, we are able to open interface at `localhost:8080`:
+![iterface](/media/lab4-5.png)
